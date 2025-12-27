@@ -1,26 +1,26 @@
 package index
 
-// Index is a simple interface for indexing
-type Index interface {
-	Put(key string, pos int)
-	Get(key string) (int, bool)
+import "sync"
+
+// Index maps key to disk offset
+type Index struct {
+	mu    sync.RWMutex
+	table map[string]int64
 }
 
-// MemoryIndex stores key and its position/reference
-type MemoryIndex struct {
-	data map[string]int
+func NewIndex() *Index {
+	return &Index{table: make(map[string]int64)}
 }
 
-func NewMemoryIndex() *MemoryIndex {
-	return &MemoryIndex{data: make(map[string]int)}
+func (i *Index) Put(key string, offset int64) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.table[key] = offset
 }
 
-func (i *MemoryIndex) Put(key string, pos int) {
-	i.data[key] = pos
+func (i *Index) Get(key string) (int64, bool) {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	offset, ok := i.table[key]
+	return offset, ok
 }
-
-func (i *MemoryIndex) Get(key string) (int, bool) {
-	pos, ok := i.data[key]
-	return pos, ok
-}
-

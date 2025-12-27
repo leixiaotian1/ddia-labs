@@ -2,79 +2,54 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"github.com/ddia-labs/labs/14-simple-db/storage"
+	"github.com/ddia-labs/labs/14-simple-db/index"
 	"github.com/ddia-labs/labs/14-simple-db/transaction"
-	"time"
+	"github.com/ddia-labs/labs/14-simple-db/query"
 )
 
-// SimpleDB combines all components
-type SimpleDB struct {
-	storage *storage.LSMStorage
-	tm      *transaction.TransactionManager
-}
-
-func NewSimpleDB() *SimpleDB {
-	return &SimpleDB{
-		storage: storage.NewLSMStorage(3),
-		tm:      transaction.NewTransactionManager(),
-	}
-}
-
-func (db *SimpleDB) Set(key, value string) {
-	db.tm.Lock(key)
-	defer db.tm.Unlock(key)
-	db.storage.Put(key, value)
-}
-
-func (db *SimpleDB) Get(key string) (string, bool) {
-	return db.storage.Get(key)
-}
-
 func main() {
-	fmt.Println("=== SimpleDB: 综合数据库演示 ===")
+	dbFile := "simple.db"
+	defer os.Remove(dbFile)
+
+	// 1. 初始化底层组件
+	s, _ := storage.NewDiskStorage(dbFile)
+	idx := index.NewIndex()
+	lm := transaction.NewLockManager()
+	defer s.Close()
+
+	// 2. 初始化查询引擎 (Query Layer)
+	engine := query.NewEngine(s, idx, lm)
+
+	fmt.Println("=== SimpleDB: 完整架构演示 (含查询层) ===")
+	fmt.Println("架构层级: Query(解析) -> Transaction(并发控制) -> Storage(磁盘) & Index(内存)")
 	fmt.Println()
-	fmt.Println("该示例整合了:")
-	fmt.Println("1. 存储层: LSM-tree 结构")
-	fmt.Println("2. 事务层: 行级锁模拟")
-	fmt.Println("3. 接口层: 简单的 Get/Set 接口")
-	fmt.Println()
 
-	db := NewSimpleDB()
+	// 演示 3: 通过查询层执行指令
+	fmt.Println("--- 场景: 通过查询层执行指令 ---")
+	
+	commands := []string{
+		"SET user:1 Alice",
+		"SET user:2 Bob",
+		"GET user:1",
+		"SET user:1 Alice_Updated",
+		"GET user:1",
+		"GET user:999", // 不存在的 key
+	}
 
-	// 演示写入
-	fmt.Println("--- 写入测试 ---")
-	db.Set("user:1", "Alice")
-	db.Set("user:2", "Bob")
-	db.Set("user:3", "Charlie")
-	db.Set("user:4", "David") // 触发 LSM Flush
-
-	// 演示并发写入和锁
-	fmt.Println("\n--- 并发事务测试 ---")
-	go func() {
-		db.tm.Lock("user:1")
-		fmt.Println("[Tx 1] 获取 user:1 锁，开始耗时操作...")
-		time.Sleep(200 * time.Millisecond)
-		db.storage.Put("user:1", "Alice-Revised")
-		db.tm.Unlock("user:1")
-		fmt.Println("[Tx 1] 提交并释放锁")
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-	fmt.Println("[Main] 尝试更新 user:1 (将被 Tx 1 阻塞)")
-	db.Set("user:1", "Alice-Main")
-	fmt.Println("[Main] 更新 user:1 成功")
-
-	// 演示读取
-	fmt.Println("\n--- 读取测试 ---")
-	val, _ := db.Get("user:1")
-	fmt.Printf("user:1 = %s\n", val)
-	val2, _ := db.Get("user:4")
-	fmt.Printf("user:4 = %s (从 SSTable 读取)\n", val2)
+	for _, cmd := range commands {
+		result, err := engine.Execute(cmd)
+		if err != nil {
+			fmt.Printf("执行失败 [%s]: %v\n", cmd, err)
+		} else {
+			fmt.Printf("执行指令 [%s] -> 结果: %s\n", cmd, result)
+		}
+	}
 
 	fmt.Println()
-	fmt.Println("=== 总结 ===")
-	fmt.Println("1. SimpleDB 展示了如何将存储引擎、事务管理整合在一起。")
-	fmt.Println("2. LSM-tree 保证了高效写入，通过多层级查询保证读取。")
-	fmt.Println("3. 事务管理器保证了并发访问的正确性。")
+	fmt.Println("=== 为什么需要 Query 层？ ===")
+	fmt.Println("1. 抽象细节：用户不需要知道磁盘 Offset 或如何加锁，只需发送字符串指令。")
+	fmt.Println("2. 统一入口：所有并发冲突和组件协调都在 Query 层完成，保证了系统的正确性。")
+	fmt.Println("3. 可扩展性：如果以后要支持 SQL 或 JSON 查询，只需在 Query 层增加解析逻辑。")
 }
-

@@ -1,63 +1,72 @@
 package storage
 
 import (
+	"bufio"
 	"fmt"
-	"sort"
+	"os"
+	"strings"
+	"sync"
 )
 
-type Entry struct {
-	Key   string
-	Value string
+type DiskStorage struct {
+	file   *os.File
+	mu     sync.Mutex
+	offset int64
 }
 
-// LSMStorage is a simplified LSM-tree storage engine
-type LSMStorage struct {
-	memTable   map[string]string
-	ssTables   [][]Entry
-	threshold  int
-}
-
-func NewLSMStorage(threshold int) *LSMStorage {
-	return &LSMStorage{
-		memTable:  make(map[string]string),
-		ssTables:  make([][]Entry, 0),
-		threshold: threshold,
+func NewDiskStorage(path string) (*DiskStorage, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	if err != nil {
+		return nil, err
 	}
+	stat, _ := f.Stat()
+	return &DiskStorage{
+		file:   f,
+		offset: stat.Size(),
+	}, nil
 }
 
-func (s *LSMStorage) Put(key, value string) {
-	s.memTable[key] = value
-	if len(s.memTable) >= s.threshold {
-		s.flush()
+func (s *DiskStorage) Write(key, value string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currOffset := s.offset
+	// 使用 | 作为 Key 和 Value 的分隔符，减少冲突
+	data := fmt.Sprintf("%s|%s\n", key, value)
+	n, err := s.file.WriteString(data)
+	if err != nil {
+		return 0, err
 	}
+
+	s.offset += int64(n)
+	return currOffset, nil
 }
 
-func (s *LSMStorage) Get(key string) (string, bool) {
-	if val, ok := s.memTable[key]; ok {
-		return val, true
+func (s *DiskStorage) ReadAt(offset int64) (string, string, error) {
+	f, err := os.Open(s.file.Name())
+	if err != nil {
+		return "", "", err
 	}
-	// Check SSTables from newest to oldest
-	for i := len(s.ssTables) - 1; i >= 0; i-- {
-		idx := sort.Search(len(s.ssTables[i]), func(j int) bool {
-			return s.ssTables[i][j].Key >= key
-		})
-		if idx < len(s.ssTables[i]) && s.ssTables[i][idx].Key == key {
-			return s.ssTables[i][idx].Value, true
+	defer f.Close()
+
+	_, err = f.Seek(offset, 0)
+	if err != nil {
+		return "", "", err
+	}
+
+	// 使用 Scanner 读取一行，更稳健
+	scanner := bufio.NewScanner(f)
+	if scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1], nil
 		}
 	}
-	return "", false
+	return "", "", fmt.Errorf("read failed at offset %d", offset)
 }
 
-func (s *LSMStorage) flush() {
-	fmt.Println("[Storage] MemTable 达到阈值，刷新到 SSTable...")
-	entries := make([]Entry, 0, len(s.memTable))
-	for k, v := range s.memTable {
-		entries = append(entries, Entry{Key: k, Value: v})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Key < entries[j].Key
-	})
-	s.ssTables = append(s.ssTables, entries)
-	s.memTable = make(map[string]string)
+func (s *DiskStorage) Close() {
+	s.file.Sync()
+	s.file.Close()
 }
-

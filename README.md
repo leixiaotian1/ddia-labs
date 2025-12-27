@@ -36,7 +36,7 @@ ddia-labs/
 ### Phase 3 - 高级主题
 - [06-distributed-tx](labs/06-distributed-tx/) - 分布式事务
 - [08-consensus](labs/08-consensus/) - 共识算法（Raft、Paxos）
-- [14-simple-db](labs/14-simple-db/) - 简单数据库综合实现
+- [14-simple-db](labs/14-simple-db/) - 简单数据库综合实现 (Bitcask 模型实践) ⭐⭐
 
 ### Phase 4 - 扩展主题
 - [09-vector-clock](labs/09-vector-clock/) - 向量时钟
@@ -49,6 +49,7 @@ ddia-labs/
 
 ### 前置要求
 - Go 1.21 或更高版本
+- Docker (可选，用于容器化部署演示)
 
 ### 运行示例
 

@@ -4,24 +4,20 @@ import (
 	"sync"
 )
 
-// TransactionManager handles simple transactions
-type TransactionManager struct {
-	locks sync.Map // Simple row-level locking simulation
+// LockManager handles row-level concurrency control
+type LockManager struct {
+	locks sync.Map
 }
 
-func NewTransactionManager() *TransactionManager {
-	return &TransactionManager{}
+func NewLockManager() *LockManager {
+	return &LockManager{}
 }
 
-func (tm *TransactionManager) Lock(key string) {
-	lock, _ := tm.locks.LoadOrStore(key, &sync.Mutex{})
-	lock.(*sync.Mutex).Lock()
+// LockKey ensures exclusive access to a specific key during write operations
+func (lm *LockManager) LockKey(key string) func() {
+	l, _ := lm.locks.LoadOrStore(key, &sync.Mutex{})
+	mtx := l.(*sync.Mutex)
+	mtx.Lock()
+	// Return an unlock function for easy deferring
+	return func() { mtx.Unlock() }
 }
-
-func (tm *TransactionManager) Unlock(key string) {
-	lock, ok := tm.locks.Load(key)
-	if ok {
-		lock.(*sync.Mutex).Unlock()
-	}
-}
-
